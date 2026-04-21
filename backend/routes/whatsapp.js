@@ -7,6 +7,8 @@ const { messageQueue } = require('../queues/messageQueue');
 const WhatsAppSession = require('../models/WhatsAppSession');
 const Message = require('../models/Message');
 
+const MAX_CONTACTS_PER_CAMPAIGN = 2000;
+
 /**
  * POST /api/whatsapp/connect
  * Protected - requires JWT token.
@@ -157,13 +159,27 @@ router.post('/campaign/launch', protect, async (req, res) => {
             });
         }
 
+        if (contacts.length > MAX_CONTACTS_PER_CAMPAIGN) {
+            return res.status(413).json({
+                success: false,
+                error: `A single campaign can include up to ${MAX_CONTACTS_PER_CAMPAIGN} contacts.`,
+            });
+        }
+
         const ownedSession = await WhatsAppSession.findOne({
             sessionId,
             userId: req.user._id,
-        }).select('sessionId');
+        }).select('sessionId status');
 
         if (!ownedSession) {
             return res.status(404).json({ success: false, error: 'Session not found.' });
+        }
+
+        if (String(ownedSession.status || '').toLowerCase() !== 'connected') {
+            return res.status(409).json({
+                success: false,
+                error: 'Selected WhatsApp session is not connected.',
+            });
         }
 
         const normalizedContacts = contacts
@@ -190,18 +206,29 @@ router.post('/campaign/launch', protect, async (req, res) => {
         }));
 
         const createdMessages = await Message.insertMany(messageDocs);
+        const insertedIds = createdMessages.map((queuedMessage) => queuedMessage._id);
 
         const jobs = createdMessages.map((queuedMessage) => ({
             name: `campaign-message-${queuedMessage._id}`,
             data: {
                 messageId: queuedMessage._id.toString(),
+                userId: req.user._id.toString(),
                 receiver: queuedMessage.receiver,
                 message: queuedMessage.content,
                 sessionId: queuedMessage.sessionId,
             },
         }));
 
-        await messageQueue.addBulk(jobs);
+        try {
+            await messageQueue.addBulk(jobs);
+        } catch (queueError) {
+            await Message.deleteMany({
+                _id: { $in: insertedIds },
+                userId: req.user._id,
+                sessionId,
+            });
+            throw queueError;
+        }
 
         return res.status(202).json({
             success: true,

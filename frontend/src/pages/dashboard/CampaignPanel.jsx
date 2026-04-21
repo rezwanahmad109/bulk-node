@@ -177,6 +177,9 @@ export default function CampaignPanel() {
 
             const payload = {
                 sessionId: activeSessionId,
+                campaignName: campaignName.trim(),
+                minDelay: Number(minDelay),
+                maxDelay: Number(maxDelay),
                 contacts: recipients.map((contact) => ({
                     phone: contact.phone,
                     name: contact.name,

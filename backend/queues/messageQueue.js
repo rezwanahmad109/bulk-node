@@ -74,9 +74,12 @@ const normalizeToJid = (receiver) => {
     return `${digits}@s.whatsapp.net`;
 };
 
-const updateMessageStatus = async (messageId, status) => {
-    if (!messageId) return;
-    await Message.findByIdAndUpdate(messageId, { status }).exec();
+const updateMessageStatus = async ({ messageId, userId, sessionId, status }) => {
+    if (!messageId || !userId) return;
+    await Message.findOneAndUpdate(
+        { _id: messageId, userId, sessionId },
+        { status }
+    ).exec();
 };
 
 const createMessageWorker = () => {
@@ -85,9 +88,13 @@ const createMessageWorker = () => {
     messageWorker = new Worker(
         QUEUE_NAME,
         async (job) => {
-            const { messageId, receiver, message, sessionId } = job.data;
+            const { messageId, userId, receiver, message, sessionId } = job.data;
 
             try {
+                if (!userId) {
+                    throw new Error('Job payload missing userId.');
+                }
+
                 const activeSession = getSession(sessionId);
                 if (!activeSession) {
                     throw new Error('WhatsApp session is not connected.');
@@ -100,7 +107,12 @@ const createMessageWorker = () => {
                 const jid = normalizeToJid(receiver);
                 await activeSession.sendMessage(jid, { text: message });
 
-                await updateMessageStatus(messageId, 'sent');
+                await updateMessageStatus({
+                    messageId,
+                    userId,
+                    sessionId,
+                    status: 'sent',
+                });
 
                 processedMessageCount += 1;
                 if (processedMessageCount % cooldownEvery === 0) {
@@ -111,7 +123,12 @@ const createMessageWorker = () => {
 
                 return { status: 'sent', jid };
             } catch (error) {
-                await updateMessageStatus(messageId, 'failed');
+                await updateMessageStatus({
+                    messageId,
+                    userId,
+                    sessionId,
+                    status: 'failed',
+                });
                 throw error;
             }
         },
