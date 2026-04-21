@@ -1,39 +1,108 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Rocket, Image as ImageIcon, Zap, AlertCircle, Send, Users, User } from 'lucide-react';
+import { Rocket, Image as ImageIcon, Zap, AlertCircle, Send, Loader2, CheckCircle2 } from 'lucide-react';
 import { Checkbox } from "@/components/ui/checkbox";
+import axios from 'axios';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+const DEFAULT_MIN_DELAY = "15";
+const DEFAULT_MAX_DELAY = "45";
+
+const targetGroups = [
+    { id: "1", name: "Chuadanga VIP Dealers (45 Contacts)" },
+    { id: "2", name: "Jessore Retailers (120 Contacts)" },
+    { id: "3", name: "Internal Sales Team (15 Contacts)" }
+];
+
+const mockContacts = [
+    { id: 1, name: "Anisur Rahman", phone: "+880 1711-000000" },
+    { id: 2, name: "Ruhul Amin", phone: "+880 1612-111111" },
+    { id: 3, name: "Suman Kumar", phone: "+880 1913-222222" },
+    { id: 4, name: "Tariqul Islam", phone: "+880 1514-333333" },
+    { id: 5, name: "Kamal Hossain", phone: "+880 1315-444444" },
+    { id: 6, name: "Mizanur Rahman", phone: "+880 1416-555555" },
+    { id: 7, name: "Shafiqul Alam", phone: "+880 1817-666666" }
+];
+
+const groupContactIds = {
+    "1": [1, 2, 3],
+    "2": [4, 5, 6, 7],
+    "3": [2, 6],
+};
 
 export default function CampaignPanel() {
     const [campaignName, setCampaignName] = useState("");
     const [message, setMessage] = useState("");
-    const [minDelay, setMinDelay] = useState("15");
-    const [maxDelay, setMaxDelay] = useState("45");
+    const [minDelay, setMinDelay] = useState(DEFAULT_MIN_DELAY);
+    const [maxDelay, setMaxDelay] = useState(DEFAULT_MAX_DELAY);
+    const [selectedGroupId, setSelectedGroupId] = useState("");
 
     // Selection Type States
     const [selectionType, setSelectionType] = useState('group'); // 'group' or 'random'
     const [selectedContacts, setSelectedContacts] = useState([]);
+    const [activeSessionId, setActiveSessionId] = useState("");
+    const [isLaunching, setIsLaunching] = useState(false);
+    const [sessionError, setSessionError] = useState("");
+    const [notification, setNotification] = useState(null);
 
-    // Mock Data for select dropdown
-    const targetGroups = [
-        { id: "1", name: "Chuadanga VIP Dealers (45 Contacts)" },
-        { id: "2", name: "Jessore Retailers (120 Contacts)" },
-        { id: "3", name: "Internal Sales Team (15 Contacts)" }
-    ];
+    useEffect(() => {
+        let isMounted = true;
 
-    const mockContacts = [
-        { id: 1, name: "Anisur Rahman", phone: "+880 1711-000000" },
-        { id: 2, name: "Ruhul Amin", phone: "+880 1612-111111" },
-        { id: 3, name: "Suman Kumar", phone: "+880 1913-222222" },
-        { id: 4, name: "Tariqul Islam", phone: "+880 1514-333333" },
-        { id: 5, name: "Kamal Hossain", phone: "+880 1315-444444" },
-        { id: 6, name: "Mizanur Rahman", phone: "+880 1416-555555" },
-        { id: 7, name: "Shafiqul Alam", phone: "+880 1817-666666" }
-    ];
+        const fetchActiveSession = async () => {
+            try {
+                const token = localStorage.getItem('bulknode_token');
+                if (!token) {
+                    if (isMounted) {
+                        setSessionError('Login session missing. Please login again.');
+                    }
+                    return;
+                }
+
+                const res = await axios.get(`${API_URL}/api/whatsapp/sessions`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+
+                const sessions = res.data?.sessions || [];
+                const connectedSession = sessions.find((session) => session.status === 'connected');
+                const fallbackSession = sessions[0];
+
+                if (isMounted) {
+                    if (connectedSession) {
+                        setActiveSessionId(connectedSession.sessionId);
+                    } else if (fallbackSession) {
+                        setActiveSessionId(fallbackSession.sessionId);
+                    } else {
+                        setSessionError('No WhatsApp account found. Connect an account first.');
+                    }
+                }
+            } catch (error) {
+                if (isMounted) {
+                    setSessionError('Failed to load WhatsApp session. Try again.');
+                }
+            }
+        };
+
+        fetchActiveSession();
+
+        return () => {
+            isMounted = false;
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!notification) return undefined;
+
+        const timer = setTimeout(() => {
+            setNotification(null);
+        }, 3500);
+
+        return () => clearTimeout(timer);
+    }, [notification]);
 
     const toggleContact = (id) => {
         if (selectedContacts.includes(id)) {
@@ -47,8 +116,118 @@ export default function CampaignPanel() {
         setMessage(prev => prev + variable);
     };
 
+    const selectedIndividualContacts = useMemo(
+        () => mockContacts.filter((contact) => selectedContacts.includes(contact.id)),
+        [selectedContacts]
+    );
+
+    const selectedGroupContacts = useMemo(() => {
+        const contactIds = groupContactIds[selectedGroupId] || [];
+        return mockContacts.filter((contact) => contactIds.includes(contact.id));
+    }, [selectedGroupId]);
+
+    const recipients = selectionType === 'group' ? selectedGroupContacts : selectedIndividualContacts;
+
+    const resetForm = () => {
+        setCampaignName("");
+        setMessage("");
+        setMinDelay(DEFAULT_MIN_DELAY);
+        setMaxDelay(DEFAULT_MAX_DELAY);
+        setSelectionType('group');
+        setSelectedGroupId("");
+        setSelectedContacts([]);
+    };
+
+    const handleLaunchCampaign = async () => {
+        if (isLaunching) return;
+
+        if (!activeSessionId) {
+            setNotification({ type: 'error', message: 'No active WhatsApp session. Please connect one account first.' });
+            return;
+        }
+
+        if (!message.trim()) {
+            setNotification({ type: 'error', message: 'Message content is required.' });
+            return;
+        }
+
+        if (selectionType === 'group' && !selectedGroupId) {
+            setNotification({ type: 'error', message: 'Please select a target group.' });
+            return;
+        }
+
+        if (selectionType === 'random' && selectedIndividualContacts.length === 0) {
+            setNotification({ type: 'error', message: 'Please select at least one contact.' });
+            return;
+        }
+
+        if (recipients.length === 0) {
+            setNotification({ type: 'error', message: 'No valid recipients found for this campaign.' });
+            return;
+        }
+
+        try {
+            setIsLaunching(true);
+            const token = localStorage.getItem('bulknode_token');
+
+            if (!token) {
+                setNotification({ type: 'error', message: 'Login session missing. Please login again.' });
+                return;
+            }
+
+            const payload = {
+                sessionId: activeSessionId,
+                contacts: recipients.map((contact) => ({
+                    phone: contact.phone,
+                    name: contact.name,
+                })),
+                message: message.trim(),
+            };
+
+            const res = await axios.post(`${API_URL}/api/whatsapp/campaign/launch`, payload, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+
+            if (res.status === 202) {
+                const queuedCount = res.data?.queuedCount ?? recipients.length;
+                setNotification({
+                    type: 'success',
+                    message: `Campaign queued successfully. ${queuedCount} message(s) added to queue.`,
+                });
+                resetForm();
+            } else {
+                setNotification({ type: 'error', message: 'Unexpected response from server.' });
+            }
+        } catch (error) {
+            const apiError = error?.response?.data?.error;
+            setNotification({
+                type: 'error',
+                message: apiError || 'Failed to launch campaign. Please try again.',
+            });
+        } finally {
+            setIsLaunching(false);
+        }
+    };
+
     return (
         <div className="p-6 space-y-6 h-[calc(100vh-5rem)] overflow-y-auto">
+            {notification && (
+                <div className={`fixed right-6 top-24 z-50 rounded-xl border px-4 py-3 shadow-lg backdrop-blur-sm ${
+                    notification.type === 'success'
+                        ? 'bg-[#25D366]/10 border-[#25D366]/30 text-[#25D366]'
+                        : 'bg-red-500/10 border-red-500/30 text-red-400'
+                }`}>
+                    <div className="flex items-start gap-3">
+                        {notification.type === 'success' ? (
+                            <CheckCircle2 className="h-5 w-5 mt-0.5" />
+                        ) : (
+                            <AlertCircle className="h-5 w-5 mt-0.5" />
+                        )}
+                        <p className="text-sm font-medium">{notification.message}</p>
+                    </div>
+                </div>
+            )}
+
             {/* Header */}
             <div className="flex flex-col gap-2 shrink-0">
                 <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
@@ -57,6 +236,13 @@ export default function CampaignPanel() {
                 </h1>
                 <p className="text-slate-400">Send personalized bulk messages safely adhering to anti-ban protocols.</p>
             </div>
+
+            {sessionError && (
+                <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 flex items-center gap-3 text-red-400">
+                    <AlertCircle className="w-5 h-5" />
+                    <p className="text-sm">{sessionError}</p>
+                </div>
+            )}
 
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
                 {/* Left Column: Form Setup */}
@@ -108,7 +294,7 @@ export default function CampaignPanel() {
                                     {selectionType === 'group' ? (
                                         <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-200">
                                             <Label className="text-slate-300">Target Group</Label>
-                                            <Select>
+                                            <Select value={selectedGroupId} onValueChange={setSelectedGroupId}>
                                                 <SelectTrigger className="bg-[#111B21] border-[#2A3942] text-slate-300 focus:ring-[#25D366]">
                                                     <SelectValue placeholder="Select Audience segment" />
                                                 </SelectTrigger>
@@ -275,10 +461,26 @@ export default function CampaignPanel() {
                         </div>
 
                         <div className="p-4 bg-[#202C33] border-t border-[#2A3942]">
-                            <Button className="w-full bg-[#25D366] hover:bg-[#1DA851] text-[#111B21] font-bold py-6 text-lg tracking-wide rounded-xl shadow-lg shadow-[#25D366]/20">
-                                <Send className="w-5 h-5 mr-2" />
-                                Launch Campaign
+                            <Button
+                                onClick={handleLaunchCampaign}
+                                disabled={isLaunching}
+                                className="w-full bg-[#25D366] hover:bg-[#1DA851] text-[#111B21] font-bold py-6 text-lg tracking-wide rounded-xl shadow-lg shadow-[#25D366]/20 disabled:opacity-70"
+                            >
+                                {isLaunching ? (
+                                    <>
+                                        <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                                        Queueing Campaign...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Send className="w-5 h-5 mr-2" />
+                                        Launch Campaign
+                                    </>
+                                )}
                             </Button>
+                            <p className="text-xs text-slate-500 mt-3 text-center">
+                                {activeSessionId ? `Session: ${activeSessionId}` : 'No active session selected'} - Recipients: {recipients.length}
+                            </p>
                         </div>
                     </Card>
                 </div>
