@@ -11,6 +11,7 @@ const whatsAppSessionSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
         required: true,
+        index: true,
     },
 
     // A unique identifier for this Baileys session (used for session file storage)
@@ -18,6 +19,15 @@ const whatsAppSessionSchema = new mongoose.Schema({
         type: String,
         required: true,
         unique: true,
+        index: true,
+        trim: true,
+    },
+
+    // User-defined nickname for this WhatsApp account
+    name: {
+        type: String,
+        required: true,
+        trim: true,
     },
 
     // The WhatsApp phone number linked to this session
@@ -51,7 +61,7 @@ const whatsAppSessionSchema = new mongoose.Schema({
     timestamps: true,
 });
 
-// Index for fast lookups by userId (user's dashboard view)
-whatsAppSessionSchema.index({ userId: 1 });
+// Fast and safe lookups for tenant-scoped queries.
+whatsAppSessionSchema.index({ userId: 1, sessionId: 1 });
 
 module.exports = mongoose.model('WhatsAppSession', whatsAppSessionSchema);

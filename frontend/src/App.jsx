@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import Login from './pages/auth/Login'
 import Register from './pages/auth/Register'
 import DashboardLayout from './components/layout/DashboardLayout'
+import ProtectedRoute from './components/layout/ProtectedRoute'
 import Dashboard from './pages/dashboard/Dashboard'
 import AccountManager from './pages/dashboard/AccountManager'
 import VirtualGroups from './pages/dashboard/VirtualGroups'
@@ -20,15 +21,17 @@ function App() {
         <Route path="/register" element={<Register />} />
 
         {/* Protected Dashboard Routes */}
-        <Route path="/dashboard" element={<DashboardLayout />}>
-          <Route index element={<Dashboard />} />
-          <Route path="accounts" element={<AccountManager />} />
-          <Route path="groups" element={<VirtualGroups />} />
-          <Route path="templates" element={<MessageTemplates />} />
-          <Route path="inbox" element={<Inbox />} />
-          <Route path="campaigns" element={<CampaignPanel />} />
-          <Route path="reports" element={<Reports />} />
-          <Route path="profile" element={<Profile />} />
+        <Route element={<ProtectedRoute />}>
+          <Route path="/dashboard" element={<DashboardLayout />}>
+            <Route index element={<Dashboard />} />
+            <Route path="accounts" element={<AccountManager />} />
+            <Route path="groups" element={<VirtualGroups />} />
+            <Route path="templates" element={<MessageTemplates />} />
+            <Route path="inbox" element={<Inbox />} />
+            <Route path="campaigns" element={<CampaignPanel />} />
+            <Route path="reports" element={<Reports />} />
+            <Route path="profile" element={<Profile />} />
+          </Route>
         </Route>
       </Routes>
     </BrowserRouter>

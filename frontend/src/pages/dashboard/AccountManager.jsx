@@ -14,13 +14,11 @@ import {
 } from '@/components/ui/dialog';
 import { Plus, Smartphone, Trash2, RefreshCw, QrCode, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import axios from 'axios';
-import socket from '@/utils/socket';
-import { useAuth } from '@/context/AuthContext';
+import socket, { connectSocketWithToken } from '@/utils/socket';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 
 export default function AccountManager() {
-    const { user } = useAuth();
     const [accounts, setAccounts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -106,6 +104,11 @@ export default function AccountManager() {
         try {
             setLinkStep(1);
             const token = localStorage.getItem('bulknode_token');
+            if (!token) {
+                setError('Your session has expired. Please log in again.');
+                setLinkStep(0);
+                return;
+            }
 
             const res = await axios.post(`${API_URL}/api/whatsapp/connect`,
                 { name: accountName },
@@ -114,8 +117,10 @@ export default function AccountManager() {
 
             if (res.data.success) {
                 const sid = res.data.sessionId;
+                connectSocketWithToken(token);
                 setActiveSessionId(sid);
-                // Join room for this session
+
+                // Join secure room for this session (server validates owner via handshake JWT).
                 socket.emit('join-session', sid);
             }
         } catch (err) {
@@ -271,11 +276,11 @@ export default function AccountManager() {
                         <Card key={account.sessionId} className="bg-[#202C33] border-[#2A3942] overflow-hidden hover:border-[#25D366]/40 transition-all duration-300 group shadow-lg">
                             <CardHeader className="flex flex-row items-center gap-4 pb-2 border-b border-[#111B21]">
                                 <div className="w-14 h-14 rounded-full bg-gradient-to-br from-[#25D366] to-[#128C7E] flex items-center justify-center text-white font-bold text-xl shadow-md border-2 border-[#202C33]">
-                                    {account.name[0].toUpperCase()}
+                                    {(account.name?.[0] || '?').toUpperCase()}
                                 </div>
                                 <div className="flex-1 min-w-0">
                                     <h3 className="font-bold text-white text-lg truncate">
-                                        {account.name}
+                                        {account.name || 'Unnamed Account'}
                                     </h3>
                                     <p className="text-[#25D366] font-medium text-sm truncate">
                                         {account.phoneNumber ? `+${account.phoneNumber}` : 'Needs setup'}

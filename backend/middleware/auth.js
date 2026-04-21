@@ -25,8 +25,8 @@ const protect = async (req, res, next) => {
         // Verify the token
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-        // Attach the user to the request (excluding password via `select: false` in schema)
-        req.user = await User.findById(decoded.id);
+        // Attach the user to the request with explicit password exclusion.
+        req.user = await User.findById(decoded.id).select('-password');
 
         if (!req.user) {
             return res.status(401).json({
