@@ -9,6 +9,8 @@ const jwt = require('jsonwebtoken');
 const { Server } = require('socket.io');
 const connectDB = require('./config/db');
 const WhatsAppSession = require('./models/WhatsAppSession');
+const { initSession } = require('./services/whatsapp/whatsappEngine');
+const { createMessageWorker } = require('./queues/messageQueue');
 
 // Connect to MongoDB Atlas
 connectDB();
@@ -26,6 +28,35 @@ const io = new Server(server, {
 
 // Make the io instance accessible in any route via req.app.get('io')
 app.set('io', io);
+
+const rehydrateConnectedSessions = async () => {
+    try {
+        const reconnectableSessions = await WhatsAppSession.find({
+            status: { $in: ['connected', 'CONNECTED'] },
+        }).select('sessionId');
+
+        if (!reconnectableSessions.length) {
+            console.log('Session rehydration: no connected sessions to restore.');
+            return;
+        }
+
+        console.log(`Session rehydration: attempting to restore ${reconnectableSessions.length} session(s).`);
+
+        for (const session of reconnectableSessions) {
+            try {
+                await initSession(session.sessionId, io);
+            } catch (error) {
+                console.error(`Session rehydration failed for ${session.sessionId}: ${error.message}`);
+                await WhatsAppSession.findOneAndUpdate(
+                    { sessionId: session.sessionId },
+                    { status: 'disconnected' }
+                ).exec();
+            }
+        }
+    } catch (error) {
+        console.error(`Session rehydration error: ${error.message}`);
+    }
+};
 
 const resolveSocketUserId = (socket) => {
     const token = socket.handshake?.auth?.token;
@@ -134,4 +165,10 @@ const PORT = process.env.PORT || 5001;
 server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log('Socket.IO ready');
+
+    // Start background queue worker on API boot.
+    createMessageWorker();
+
+    // Restore previously connected WhatsApp sessions automatically.
+    rehydrateConnectedSessions();
 });

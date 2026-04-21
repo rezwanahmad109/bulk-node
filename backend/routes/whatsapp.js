@@ -2,8 +2,10 @@ const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
 const { initSession, getSession, terminateSession } = require('../services/whatsapp/whatsappEngine');
+const { messageQueue } = require('../queues/messageQueue');
 
 const WhatsAppSession = require('../models/WhatsAppSession');
+const Message = require('../models/Message');
 
 /**
  * POST /api/whatsapp/connect
@@ -135,6 +137,83 @@ router.delete('/disconnect/:sessionId', protect, async (req, res) => {
         });
     } catch (error) {
         res.status(500).json({ success: false, error: 'Failed to disconnect session.' });
+    }
+});
+
+/**
+ * POST /api/whatsapp/campaign/launch
+ * Protected - requires JWT token.
+ *
+ * Queues campaign messages for background processing via BullMQ.
+ */
+router.post('/campaign/launch', protect, async (req, res) => {
+    try {
+        const { sessionId, contacts, message } = req.body;
+
+        if (!sessionId || !Array.isArray(contacts) || contacts.length === 0 || !String(message || '').trim()) {
+            return res.status(400).json({
+                success: false,
+                error: 'sessionId, contacts, and message are required.',
+            });
+        }
+
+        const ownedSession = await WhatsAppSession.findOne({
+            sessionId,
+            userId: req.user._id,
+        }).select('sessionId');
+
+        if (!ownedSession) {
+            return res.status(404).json({ success: false, error: 'Session not found.' });
+        }
+
+        const normalizedContacts = contacts
+            .map((contact) => {
+                if (typeof contact === 'string') {
+                    return { receiver: contact };
+                }
+                return { receiver: contact?.receiver || contact?.phone };
+            })
+            .filter((contact) => String(contact.receiver || '').trim().length > 0);
+
+        if (normalizedContacts.length === 0) {
+            return res.status(400).json({ success: false, error: 'No valid contact receivers found.' });
+        }
+
+        const messageDocs = normalizedContacts.map((contact) => ({
+            userId: req.user._id,
+            sessionId,
+            sender: 'campaign',
+            receiver: String(contact.receiver).trim(),
+            content: String(message).trim(),
+            status: 'pending',
+            isIncoming: false,
+        }));
+
+        const createdMessages = await Message.insertMany(messageDocs);
+
+        const jobs = createdMessages.map((queuedMessage) => ({
+            name: `campaign-message-${queuedMessage._id}`,
+            data: {
+                messageId: queuedMessage._id.toString(),
+                receiver: queuedMessage.receiver,
+                message: queuedMessage.content,
+                sessionId: queuedMessage.sessionId,
+            },
+        }));
+
+        await messageQueue.addBulk(jobs);
+
+        return res.status(202).json({
+            success: true,
+            message: 'Campaign accepted and queued for background processing.',
+            queuedCount: jobs.length,
+        });
+    } catch (error) {
+        console.error('Campaign launch error:', error.message);
+        return res.status(500).json({
+            success: false,
+            error: 'Failed to launch campaign.',
+        });
     }
 });
 
