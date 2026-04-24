@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, UserSquare2, Users, Megaphone, BarChart, Menu, X, Bell, Search, FileText, MessageSquare, LogOut, Settings } from 'lucide-react';
+import { Outlet, Link, useLocation } from 'react-router-dom';
+import { LayoutDashboard, UserSquare2, Users, Megaphone, BarChart, Menu, Bell, Search, FileText, MessageSquare, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/context/AuthContext';
@@ -8,8 +8,7 @@ import { useAuth } from '@/context/AuthContext';
 export default function DashboardLayout() {
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const location = useLocation();
-    const navigate = useNavigate();
-    const { user, logout, getInitials } = useAuth();
+    const { user, getInitials } = useAuth();
 
     const navigation = [
         { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },

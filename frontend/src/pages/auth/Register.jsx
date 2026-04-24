@@ -59,7 +59,7 @@ export default function Register() {
             // Store in context (which also persists to localStorage)
             login(data.user, data.token);
             navigate('/dashboard');
-        } catch (err) {
+        } catch {
             setError('Unable to connect to the server. Please try again later.');
             setLoading(false);
         }
@@ -193,7 +193,7 @@ export default function Register() {
                                                             key={c.code}
                                                             value={c.name}
                                                             className="text-slate-300 aria-selected:bg-[#111B21] aria-selected:text-[#25D366] cursor-pointer"
-                                                            onSelect={(currentValue) => {
+                                                            onSelect={() => {
                                                                 setCountry(c.code === country ? "" : c.code);
                                                                 setOpen(false);
                                                             }}

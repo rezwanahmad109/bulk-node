@@ -50,6 +50,8 @@ const register = async (req, res) => {
                 fullName: user.fullName,
                 email: user.email,
                 businessName: user.businessName,
+                businessType: user.businessType,
+                country: user.country,
             },
         });
     } catch (err) {
@@ -99,6 +101,8 @@ const login = async (req, res) => {
                 fullName: user.fullName,
                 email: user.email,
                 businessName: user.businessName,
+                businessType: user.businessType,
+                country: user.country,
             },
         });
     } catch (err) {

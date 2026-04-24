@@ -46,7 +46,15 @@ const whatsAppSessionSchema = new mongoose.Schema({
     status: {
         type: String,
         enum: ['connecting', 'connected', 'disconnected'],
+        lowercase: true,
         default: 'connecting',
+    },
+
+    // Exactly one session per user can be marked active at a time.
+    isActive: {
+        type: Boolean,
+        default: false,
+        index: true,
     },
 
     // Stores the Baileys session creds as JSON (auth state)
@@ -63,5 +71,9 @@ const whatsAppSessionSchema = new mongoose.Schema({
 
 // Fast and safe lookups for tenant-scoped queries.
 whatsAppSessionSchema.index({ userId: 1, sessionId: 1 });
+whatsAppSessionSchema.index(
+    { userId: 1, isActive: 1 },
+    { unique: true, partialFilterExpression: { isActive: true } }
+);
 
 module.exports = mongoose.model('WhatsAppSession', whatsAppSessionSchema);

@@ -40,7 +40,7 @@ export default function Login() {
             // Store in context (which also persists to localStorage)
             login(data.user, data.token);
             navigate('/dashboard');
-        } catch (err) {
+        } catch {
             setError('Unable to connect to the server. Please try again later.');
             setLoading(false);
         }

@@ -32,7 +32,7 @@ app.set('io', io);
 const rehydrateConnectedSessions = async () => {
     try {
         const reconnectableSessions = await WhatsAppSession.find({
-            status: { $in: ['connected', 'CONNECTED'] },
+            status: 'connected',
         }).select('sessionId');
 
         if (!reconnectableSessions.length) {

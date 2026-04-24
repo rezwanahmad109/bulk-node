@@ -25,9 +25,29 @@ const messageSchema = new mongoose.Schema({
         type: String,
         required: true,
     },
+    mediaUrl: {
+        type: String,
+        trim: true,
+        default: null,
+    },
+    campaignName: {
+        type: String,
+        trim: true,
+        default: null,
+    },
+    minDelaySeconds: {
+        type: Number,
+        min: 1,
+        default: null,
+    },
+    maxDelaySeconds: {
+        type: Number,
+        min: 1,
+        default: null,
+    },
     status: {
         type: String,
-        enum: ['pending', 'sent', 'delivered', 'read', 'failed'],
+        enum: ['pending', 'processing', 'sent', 'delivered', 'read', 'failed'],
         default: 'pending',
     },
     timestamp: {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -28,59 +28,81 @@ export default function AccountManager() {
     const [linkStep, setLinkStep] = useState(0); // 0: Name, 1: Connecting, 2: QR, 3: Success
     const [accountName, setAccountName] = useState('');
     const [qrCode, setQrCode] = useState('');
-    const [activeSessionId, setActiveSessionId] = useState('');
+    const [linkingSessionId, setLinkingSessionId] = useState('');
     const [isDeleting, setIsDeleting] = useState(null);
+    const [isRefreshing, setIsRefreshing] = useState(false);
+    const [activatingSessionId, setActivatingSessionId] = useState('');
+    const linkingSessionIdRef = useRef('');
 
     // 1. Fetch existing sessions from backend
-    const fetchSessions = async () => {
+    const fetchSessions = useCallback(async ({ withLoader = false } = {}) => {
         try {
+            if (withLoader) {
+                setLoading(true);
+            }
+
             const token = localStorage.getItem('bulknode_token');
+            if (!token) {
+                setError('Your session has expired. Please log in again.');
+                return;
+            }
+
             const res = await axios.get(`${API_URL}/api/whatsapp/sessions`, {
-                headers: { Authorization: `Bearer ${token}` }
+                headers: { Authorization: `Bearer ${token}` },
             });
             if (res.data.success) {
                 setAccounts(res.data.sessions);
             }
-        } catch (err) {
-            console.error('Failed to fetch sessions:', err);
+        } catch (fetchError) {
+            console.error('Failed to fetch sessions:', fetchError);
             setError('Could not load WhatsApp accounts.');
         } finally {
-            setLoading(false);
+            if (withLoader) {
+                setLoading(false);
+            }
         }
-    };
-
-    useEffect(() => {
-        fetchSessions();
     }, []);
 
-    // 2. Socket listeners for real-time updates
     useEffect(() => {
-        if (!activeSessionId) return;
+        const timeoutId = setTimeout(() => {
+            void fetchSessions({ withLoader: true });
+        }, 0);
 
+        return () => clearTimeout(timeoutId);
+    }, [fetchSessions]);
+
+    // Keep a ref to avoid missing fast socket events between state updates.
+    useEffect(() => {
+        linkingSessionIdRef.current = linkingSessionId;
+    }, [linkingSessionId]);
+
+    // 2. Socket listeners for real-time updates (attached before room joins)
+    useEffect(() => {
         const onQr = (data) => {
-            if (data.sessionId === activeSessionId) {
+            if (data.sessionId === linkingSessionIdRef.current) {
                 setQrCode(data.qr);
                 setLinkStep(2);
             }
         };
 
         const onStatus = (data) => {
-            if (data.sessionId === activeSessionId) {
+            if (data.sessionId === linkingSessionIdRef.current) {
                 if (data.status === 'connected') {
                     setLinkStep(3);
                     // Refresh the list after a short delay
                     setTimeout(() => {
-                        fetchSessions();
+                        void fetchSessions();
                         setLinkStep(0);
                         setIsLinking(false);
-                        setActiveSessionId('');
+                        setLinkingSessionId('');
+                        linkingSessionIdRef.current = '';
                     }, 2000);
                 }
             }
         };
 
         const onError = (data) => {
-            if (data.sessionId === activeSessionId) {
+            if (data.sessionId === linkingSessionIdRef.current) {
                 setError(data.message || 'Connection failed.');
                 setLinkStep(0);
             }
@@ -95,7 +117,7 @@ export default function AccountManager() {
             socket.off('whatsapp:status', onStatus);
             socket.off('whatsapp:error', onError);
         };
-    }, [activeSessionId]);
+    }, [fetchSessions]);
 
     // 3. Initiate Connection Flow
     const handleStartConnection = async () => {
@@ -117,15 +139,60 @@ export default function AccountManager() {
 
             if (res.data.success) {
                 const sid = res.data.sessionId;
-                connectSocketWithToken(token);
-                setActiveSessionId(sid);
+                setLinkingSessionId(sid);
+                linkingSessionIdRef.current = sid;
 
-                // Join secure room for this session (server validates owner via handshake JWT).
-                socket.emit('join-session', sid);
+                const activeSocket = connectSocketWithToken(token);
+
+                const joinSessionRoom = () => {
+                    activeSocket.emit('join-session', sid);
+                };
+
+                if (activeSocket.connected) {
+                    joinSessionRoom();
+                } else {
+                    activeSocket.once('connect', joinSessionRoom);
+                }
             }
         } catch (err) {
             setError(err.response?.data?.error || 'Failed to start connection.');
             setLinkStep(0);
+        }
+    };
+
+    const handleRefreshSessions = async () => {
+        try {
+            setIsRefreshing(true);
+            await fetchSessions();
+        } finally {
+            setIsRefreshing(false);
+        }
+    };
+
+    const handleSetActive = async (sessionId) => {
+        try {
+            setActivatingSessionId(sessionId);
+            const token = localStorage.getItem('bulknode_token');
+            if (!token) {
+                setError('Your session has expired. Please log in again.');
+                return;
+            }
+
+            const res = await axios.put(
+                `${API_URL}/api/whatsapp/sessions/${sessionId}/active`,
+                {},
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+
+            if (res.data?.sessions) {
+                setAccounts(res.data.sessions);
+            } else {
+                await fetchSessions();
+            }
+        } catch (err) {
+            setError(err.response?.data?.error || 'Failed to set active account.');
+        } finally {
+            setActivatingSessionId('');
         }
     };
 
@@ -137,10 +204,10 @@ export default function AccountManager() {
             setIsDeleting(sessionId);
             const token = localStorage.getItem('bulknode_token');
             await axios.delete(`${API_URL}/api/whatsapp/disconnect/${sessionId}`, {
-                headers: { Authorization: `Bearer ${token}` }
+                headers: { Authorization: `Bearer ${token}` },
             });
-            fetchSessions();
-        } catch (err) {
+            await fetchSessions();
+        } catch {
             alert('Failed to delete account.');
         } finally {
             setIsDeleting(null);
@@ -158,12 +225,22 @@ export default function AccountManager() {
                     </h1>
                     <p className="text-slate-400 mt-1">Manage your multi-device WhatsApp connections</p>
                 </div>
+                <Button
+                    variant="ghost"
+                    onClick={handleRefreshSessions}
+                    disabled={isRefreshing}
+                    className="text-slate-300 hover:text-white hover:bg-[#2A3942]"
+                >
+                    {isRefreshing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+                    Refresh Sessions
+                </Button>
 
                 <Dialog open={isLinking} onOpenChange={(open) => {
                     setIsLinking(open);
                     if (!open) {
                         setLinkStep(0);
-                        setActiveSessionId('');
+                        setLinkingSessionId('');
+                        linkingSessionIdRef.current = '';
                         setAccountName('');
                         setQrCode('');
                     }
@@ -273,7 +350,14 @@ export default function AccountManager() {
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {accounts.map((account) => (
-                        <Card key={account.sessionId} className="bg-[#202C33] border-[#2A3942] overflow-hidden hover:border-[#25D366]/40 transition-all duration-300 group shadow-lg">
+                        <Card
+                            key={account.sessionId}
+                            className={`bg-[#202C33] overflow-hidden transition-all duration-300 group shadow-lg ${
+                                account.isActive
+                                    ? 'border-[#25D366] ring-1 ring-[#25D366]/30'
+                                    : 'border-[#2A3942] hover:border-[#25D366]/40'
+                            }`}
+                        >
                             <CardHeader className="flex flex-row items-center gap-4 pb-2 border-b border-[#111B21]">
                                 <div className="w-14 h-14 rounded-full bg-gradient-to-br from-[#25D366] to-[#128C7E] flex items-center justify-center text-white font-bold text-xl shadow-md border-2 border-[#202C33]">
                                     {(account.name?.[0] || '?').toUpperCase()}
@@ -288,7 +372,7 @@ export default function AccountManager() {
                                 </div>
                             </CardHeader>
                             <CardContent className="py-4 bg-[#111B21]/30">
-                                <div className="flex items-center justify-between">
+                                <div className="flex items-center justify-between gap-2">
                                     <Badge
                                         className={`
                                             ${account.status === 'connected'
@@ -304,12 +388,35 @@ export default function AccountManager() {
                                         }`}></span>
                                         {account.status.charAt(0).toUpperCase() + account.status.slice(1)}
                                     </Badge>
-                                    <span className="text-[10px] text-slate-500">ID: {account.sessionId.split('_').pop()}</span>
+                                    <Badge className={account.isActive ? 'bg-[#25D366]/10 text-[#25D366] border-[#25D366]/20' : 'bg-slate-500/10 text-slate-300 border-slate-500/20'}>
+                                        {account.isActive ? 'Active' : 'Standby'}
+                                    </Badge>
                                 </div>
+                                <p className="text-[10px] text-slate-500 mt-3">ID: {account.sessionId.split('_').pop()}</p>
                             </CardContent>
-                            <CardFooter className="bg-[#111B21]/50 border-t border-[#2A3942] flex justify-between px-4 py-3">
-                                <Button variant="ghost" size="sm" className="text-slate-300 hover:text-white hover:bg-[#2A3942]">
-                                    <RefreshCw className="w-4 h-4 mr-2" />
+                            <CardFooter className="bg-[#111B21]/50 border-t border-[#2A3942] flex items-center justify-between gap-2 px-4 py-3">
+                                <Button
+                                    onClick={() => handleSetActive(account.sessionId)}
+                                    disabled={account.isActive || account.status !== 'connected' || activatingSessionId === account.sessionId}
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-[#25D366] hover:text-[#25D366] hover:bg-[#25D366]/10 disabled:text-slate-500"
+                                >
+                                    {activatingSessionId === account.sessionId ? (
+                                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                    ) : (
+                                        <CheckCircle2 className="w-4 h-4 mr-2" />
+                                    )}
+                                    Set Active
+                                </Button>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={handleRefreshSessions}
+                                    disabled={isRefreshing}
+                                    className="text-slate-300 hover:text-white hover:bg-[#2A3942]"
+                                >
+                                    {isRefreshing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
                                     Refresh
                                 </Button>
                                 <Button
